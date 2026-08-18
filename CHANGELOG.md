@@ -22,3 +22,4 @@ All notable changes to this project are documented here.
 - Kerf domain model: Material, StockItem, Part, CuttingList, Cut, CutPiece, Plan, SavingsEvent with construction-time validation and spec-matched enums; plain-string enum values coerce to the same member.
 - `InfeasiblePlanError` carrying per-material engine reasons plus a flattened, deterministically ordered `.reasons` list.
 - CSV cutting list importer (`load_cutting_list`) with a strict five-column header, row-numbered structural errors, and default `cl-<12 hex>` ids; sample fixture `tests/fixtures/sample_cutting_list.csv`.
+- Pure proof metrics: utilization, waste length, new stock used, remnant length consumed, dollars saved, and `compute_all` keyed by the spec names.
