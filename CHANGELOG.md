@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 - Plan verification oracle (`verify_plan`): arithmetic reconciliation, no double-cut, unknown part/item, material match, and per-part demand; overproduction legal; `PlanVerificationError` aggregates all problems found in one pass.
 - Kerf solver (`solve`): a cutting list, a stock room, and material prices become a PROPOSED plan with one named cut piece per part id, remnant-first bar pricing at zero cost, the five proof metrics, and every infeasible material collected before `InfeasiblePlanError` is raised.
 - Kerf ledger (`record_plan_cut`): a PROPOSED or RELEASED plan becomes CUT, its consumed bars become CONSUMED, its offcuts return to the rack as AVAILABLE remnants carrying their parent plan, and a `SavingsEvent` is written with the remnant consumption and dollars avoided derived from the pure metrics; every guard runs before any mutation.
+- Property tests over sixty seeded random trials: every solver plan must verify against the oracle, reconcile to the millimetre, and carry pure-recompute metrics; infeasibility must name every material with a part outgrowing every available bar; the ledger consumes each stock item exactly once and racks remnants with the parent plan.
 
 ### Fixed
 - The integer master runs the deterministic fill before declaring a restricted master infeasible, so a plan column generation never priced is still found instead of a false infeasible.
