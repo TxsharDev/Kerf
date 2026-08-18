@@ -12,3 +12,5 @@ All notable changes to this project are documented here.
 - Pattern helpers and bar context grouping (oldest remnant first, deterministic order).
 - Master LP, capacity-free master dual, and reduced cost computation.
 - Pricing round (effective-weight knapsack) and column generation loop.
+- Integer master solver (HiGHS via scipy.milp) with status honesty: optimal, incumbent, heuristic, infeasible, no_incumbent.
+- Deterministic floor-then-knapsack fallback fill for when the MIP solver returns no incumbent.
