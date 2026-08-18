@@ -14,3 +14,4 @@ All notable changes to this project are documented here.
 - Pricing round (effective-weight knapsack) and column generation loop.
 - Integer master solver (HiGHS via scipy.milp) with status honesty: optimal, incumbent, heuristic, infeasible, no_incumbent.
 - Deterministic floor-then-knapsack fallback fill for when the MIP solver returns no incumbent.
+- 1D cutting orchestrator: feasibility prechecks, column generation, integer solve, bar assembly, and diagnostics.
