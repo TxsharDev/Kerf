@@ -41,7 +41,7 @@ from constraint_engine.geometry.master import (
     solve_master_dual,
     solve_master_lp,
 )
-from constraint_engine.geometry.patterns import Context
+from constraint_engine.geometry.patterns import Context, pattern_fits
 from constraint_engine.geometry.types import CuttingProblem1D
 
 __all__ = [
@@ -138,11 +138,58 @@ def price_columns(
     return tuple(new_columns)
 
 
+def _validate_initial_columns(
+    problem: CuttingProblem1D,
+    contexts: Sequence[Context],
+    initial_columns: Sequence[MasterColumn],
+) -> tuple[MasterColumn, ...]:
+    """Check each warm-start column against the problem and contexts.
+
+    Warm-start columns arrive from a caller (the engine's replan) and
+    are untrusted input: a bad context index, a pattern of the wrong
+    length, a negative count, or a pattern that does not physically fit
+    the context it names is a caller error and raises ``ValueError``
+    before the generator starts.
+    """
+    n_parts = len(problem.part_lengths_mm)
+    checked: list[MasterColumn] = []
+    for column in initial_columns:
+        if not 0 <= column.context_index < len(contexts):
+            raise ValueError(
+                f"initial column context_index {column.context_index} is "
+                f"outside the context range (0..{len(contexts) - 1})"
+            )
+        if len(column.pattern) != n_parts:
+            raise ValueError(
+                f"initial column pattern length {len(column.pattern)} does "
+                f"not match the {n_parts} part types"
+            )
+        if any(count < 0 for count in column.pattern):
+            raise ValueError(
+                f"initial column pattern {column.pattern} must have "
+                "non-negative counts"
+            )
+        context = contexts[column.context_index]
+        if not pattern_fits(
+            column.pattern,
+            problem.part_lengths_mm,
+            problem.kerf_mm,
+            context.length_mm,
+        ):
+            raise ValueError(
+                f"initial column pattern {column.pattern} does not fit "
+                f"the {context.length_mm}mm context {column.context_index}"
+            )
+        checked.append(column)
+    return tuple(checked)
+
+
 def run_column_generation(
     problem: CuttingProblem1D,
     contexts: Sequence[Context],
     max_rounds: int = 100,
     tolerance: float = 1e-4,
+    initial_columns: Sequence[MasterColumn] = (),
 ) -> ColumnGenerationResult:
     """Seed, then loop: master LP, capacity-free dual, pricing.
 
@@ -150,7 +197,15 @@ def run_column_generation(
     master LP is optimal at that point, "infeasible" otherwise. A run
     that exhausts ``max_rounds`` without either stops "max_rounds" and
     reports the last optimal master solution, if any.
+
+    ``initial_columns`` are warm-start patterns from a previous plan
+    (the engine's replan hands them in so a replan reuses what already
+    worked). They are validated, then merged into the column pool
+    behind the seeds; the pool dedups them against the seeds and
+    against anything pricing rediscovers later.
     """
+    initial = _validate_initial_columns(problem, contexts, initial_columns)
+
     if not any(demand > 0 for demand in problem.demands):
         return ColumnGenerationResult(
             columns=(),
@@ -163,6 +218,9 @@ def run_column_generation(
     columns = _seed_columns(problem, contexts)
     if not columns:
         # No part type fits in any context, so demand can never be met.
+        # A valid initial column cannot change this: a positive count
+        # on a demanded part requires that part to fit some context,
+        # which the seed would have found.
         return ColumnGenerationResult(
             columns=(),
             solution=None,
@@ -172,6 +230,11 @@ def run_column_generation(
         )
 
     seen = {(col.context_index, col.pattern) for col in columns}
+    for column in initial:
+        key = (column.context_index, column.pattern)
+        if key not in seen:
+            seen.add(key)
+            columns = columns + (column,)
     last_optimal: Optional[MasterSolution] = None
 
     for round_no in range(1, max_rounds + 1):

@@ -194,3 +194,81 @@ class TestRunColumnGeneration:
         )
         assert int(counts[0]) <= 2
         assert int(counts[1]) <= 2
+
+
+class TestInitialColumns:
+    """Warm-start columns feed the generator instead of being dropped.
+
+    A caller (the engine's replan) may hand in patterns from a previous
+    plan. They must enter the column pool, dedup against the seeds and
+    against later pricing rounds, and be rejected with a clear error
+    when they are malformed.
+    """
+
+    def test_initial_column_is_kept_and_deduped(self):
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        result = run_column_generation(
+            problem,
+            contexts,
+            initial_columns=(MasterColumn(0, (1, 1)),),
+        )
+        assert result.stop == "converged"
+        assert not result.infeasible
+        keys = [(c.context_index, c.pattern) for c in result.columns]
+        # The warm-start column is in the pool, and pricing rediscovers
+        # the same (1, 1) pattern without adding a duplicate.
+        assert keys.count((0, (1, 1))) == 1
+        assert result.solution is not None
+        assert result.solution.value == pytest.approx(20.0)
+
+    def test_initial_column_deduped_against_seed(self):
+        # (0, 3) is exactly the seed for part 1 on context 0
+        # (6000 // 2000 = 3 copies); passing it back must not
+        # create a second copy of the column.
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        result = run_column_generation(
+            problem,
+            contexts,
+            initial_columns=(MasterColumn(0, (0, 3)),),
+        )
+        keys = [(c.context_index, c.pattern) for c in result.columns]
+        assert keys.count((0, (0, 3))) == 1
+
+    def test_rejects_context_index_out_of_range(self):
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        with pytest.raises(ValueError, match="context_index"):
+            run_column_generation(
+                problem, contexts, initial_columns=(MasterColumn(5, (1, 0)),)
+            )
+
+    def test_rejects_pattern_with_wrong_length(self):
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        with pytest.raises(ValueError, match="pattern"):
+            run_column_generation(
+                problem,
+                contexts,
+                initial_columns=(MasterColumn(0, (1, 1, 0)),),
+            )
+
+    def test_rejects_pattern_that_does_not_fit(self):
+        # Four 4000mm parts need 16000mm; context 0 holds 6000mm.
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        with pytest.raises(ValueError, match="fit"):
+            run_column_generation(
+                problem, contexts, initial_columns=(MasterColumn(0, (4, 0)),)
+            )
+
+    def test_rejects_negative_pattern_count(self):
+        problem = two_part_problem()
+        contexts = patterns_from_problem(problem)
+        with pytest.raises(ValueError, match="non-negative"):
+            run_column_generation(
+                problem,
+                contexts,
+                initial_columns=(MasterColumn(0, (-1, 2)),),
+            )

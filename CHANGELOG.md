@@ -15,3 +15,4 @@ All notable changes to this project are documented here.
 - Integer master solver (HiGHS via scipy.milp) with status honesty: optimal, incumbent, heuristic, infeasible, no_incumbent.
 - Deterministic floor-then-knapsack fallback fill for when the MIP solver returns no incumbent.
 - 1D cutting orchestrator: feasibility prechecks, column generation, integer solve, bar assembly, and diagnostics.
+- Warm-start `initial_columns` on the column generation loop: validated (context index, pattern length, non-negative counts, physical fit) and deduped against seeds and pricing.
