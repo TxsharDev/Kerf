@@ -23,3 +23,4 @@ All notable changes to this project are documented here.
 - `InfeasiblePlanError` carrying per-material engine reasons plus a flattened, deterministically ordered `.reasons` list.
 - CSV cutting list importer (`load_cutting_list`) with a strict five-column header, row-numbered structural errors, and default `cl-<12 hex>` ids; sample fixture `tests/fixtures/sample_cutting_list.csv`.
 - Pure proof metrics: utilization, waste length, new stock used, remnant length consumed, dollars saved, and `compute_all` keyed by the spec names.
+- Plan verification oracle (`verify_plan`): arithmetic reconciliation, no double-cut, unknown part/item, material match, and per-part demand; overproduction legal; `PlanVerificationError` aggregates all problems found in one pass.
