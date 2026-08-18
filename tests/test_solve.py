@@ -64,6 +64,24 @@ class TestSolveFeasible:
         assert result.stats["columns_kept"] >= 1
         assert result.stats["bars_total"] == 2
 
+    def test_single_bar_multi_part_is_feasible(self):
+        # One bar must carry both part types: 2500 + kerf + 1500 fits
+        # in 6000, but the (1, 1) pattern has positive reduced cost, so
+        # column generation never prices it. The restricted integer
+        # master is infeasible over the seeds alone and must be
+        # repaired by the fill instead of reported as infeasible.
+        problem = CuttingProblem1D(
+            part_lengths_mm=[2500, 1500],
+            demands=[1, 1],
+            bars=(bar(6000, 60.0, "b0"),),
+            kerf_mm=3,
+        )
+        result = solve(problem)
+        assert result.feasible
+        assert len(result.assignments) == 1
+        assert tuple(result.assignments[0].pattern) == (1, 1)
+        assert result.stats["ip_status"] in ("optimal", "incumbent", "heuristic")
+
 
 class TestSolveInfeasible:
     def test_part_longer_than_any_bar(self):

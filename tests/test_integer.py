@@ -95,6 +95,26 @@ class TestSolveMasterIp:
         assert result.status == IP_INFEASIBLE
         assert result.x == ()
 
+    def test_restricted_infeasibility_is_repaired_by_fill(self):
+        # Two parts, one bar: the single-type seeds (2, 0) and (0, 3)
+        # can never cover both demands on a single bar, so HiGHS proves
+        # the restricted master infeasible, but the (1, 1) pattern the
+        # pricer never priced fits with room to spare. The fill must
+        # find it instead of reporting a false infeasible.
+        problem = CuttingProblem1D(
+            part_lengths_mm=[2500, 1500],
+            demands=[1, 1],
+            bars=(BarSpec(length_mm=6000, cost=60.0, origin="new", id="b0"),),
+            kerf_mm=3,
+        )
+        ctx = Context(length_mm=6000, cost=60.0, bar_ids=("b0",))
+        columns = (MasterColumn(0, (2, 0)), MasterColumn(0, (0, 3)))
+        result = solve_master_ip(columns, problem, (ctx,), lp_x=(0.5, 1.0 / 3.0))
+        assert result.status == IP_HEURISTIC
+        counts = _covered(2, result.columns, result.x)
+        assert (counts >= np.array([1, 1])).all()
+        assert sum(result.x) <= ctx.bar_count
+
     def test_zero_demand_is_free(self):
         problem = CuttingProblem1D(
             part_lengths_mm=[2000],

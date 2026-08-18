@@ -16,11 +16,12 @@ the strongest claim the evidence supports:
 - ``optimal``: HiGHS proved the incumbent optimal.
 - ``incumbent``: the time limit hit, but HiGHS returned a feasible
   solution that passed constraint validation.
-- ``heuristic``: HiGHS returned nothing, so a deterministic fallback
-  floored the LP solution and packed the remaining free bars with the
-  exact bounded knapsack. The fallback may add a column for a pattern
-  column generation never priced, in which case the result's columns
-  are a superset of the input.
+- ``heuristic``: HiGHS returned nothing, or proved infeasibility only
+  over the priced columns, so a deterministic fallback floored the LP
+  solution and packed the remaining free bars with the exact bounded
+  knapsack. The fallback may add a column for a pattern column
+  generation never priced, in which case the result's columns are a
+  superset of the input.
 - ``infeasible``: no integer plan covers the demand with the bars on
   hand, typically because there are too few bars.
 - ``no_incumbent``: HiGHS returned nothing and the fallback ran out
@@ -143,6 +144,13 @@ def solve_master_ip(
         options={"time_limit": time_limit_s, "mip_rel_gap": 0.0, "presolve": True},
     )
     if result.status == 2:
+        # HiGHS proved infeasibility only over the priced columns. A
+        # pattern column generation never priced may still cover the
+        # demand on the bars on hand, so run the deterministic fill
+        # before declaring the problem infeasible.
+        filled = _fallback_fill(tuple(columns), problem, contexts, lp_x)
+        if filled.status == IP_HEURISTIC:
+            return filled
         return IntegerSolution(
             status=IP_INFEASIBLE, columns=tuple(columns), x=(), value=0.0
         )
