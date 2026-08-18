@@ -1,0 +1,11 @@
+part_id,material_id,length_mm,quantity,label
+p1,al-6061,2500,2,main beam
+p2,al-6061,1800,4,secondary beam
+p3,al-6061,950,6,brace
+p4,al-6061,400,10,gusset
+p5,steel-1018,2400,2,frame rail
+p6,steel-1018,1200,8,frame cross
+p7,steel-1018,300,12,spacer
+p8,alu-tube,2200,3,tube run
+p9,alu-tube,1100,5,tube joint
+p10,alu-tube,600,8,short tube
