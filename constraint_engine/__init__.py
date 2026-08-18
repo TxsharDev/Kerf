@@ -11,6 +11,7 @@ Public API:
     diagnose(problem)          -> list[Diagnosis]
 """
 
+from constraint_engine.engine import diagnose, explain, replan, solve
 from constraint_engine.types import (
     Constraint,
     ConstraintType,
@@ -42,4 +43,8 @@ __all__ = [
     "Task",
     "Violation",
     "__version__",
+    "diagnose",
+    "explain",
+    "replan",
+    "solve",
 ]
