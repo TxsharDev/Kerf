@@ -9,6 +9,7 @@ at zero cost, and the shape of the diagnostics dict.
 import numpy as np
 import pytest
 
+from constraint_engine.geometry.master import MasterColumn
 from constraint_engine.geometry.solve import solve
 from constraint_engine.geometry.types import BarSpec, CuttingProblem1D
 
@@ -184,3 +185,30 @@ class TestKerfAndRemnants:
         result = solve(problem)
         assert not result.feasible
         assert result.infeasible_reasons
+
+
+class TestInitialColumns:
+    def test_warm_start_column_is_used_from_round_one(self):
+        # The exact-fit (1, 1) pattern is what pricing discovers on a
+        # cold start (two rounds: price in round one, converge in
+        # round two). Handed in as a warm start, the master is already
+        # optimal in round one.
+        problem = two_part_problem()
+        result = solve(problem, initial_columns=(MasterColumn(0, (1, 1)),))
+        assert result.feasible
+        assert result.ip_value == pytest.approx(20.0)
+        assert result.stats["cg_rounds"] == 1
+
+    def test_warm_start_deduped_against_seed(self):
+        # (0, 3) is exactly the seed for part 1; passing it back must
+        # not grow the pool. The cold-start pool ends at 3 columns
+        # (two seeds plus the priced (1, 1)).
+        problem = two_part_problem()
+        result = solve(problem, initial_columns=(MasterColumn(0, (0, 3)),))
+        assert result.feasible
+        assert result.stats["columns_kept"] == 3
+
+    def test_warm_start_rejects_bad_columns(self):
+        problem = two_part_problem()
+        with pytest.raises(ValueError, match="context_index"):
+            solve(problem, initial_columns=(MasterColumn(7, (1, 0)),))

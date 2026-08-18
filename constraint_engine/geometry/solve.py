@@ -8,7 +8,8 @@ objective values, and diagnostics. The pipeline is:
    returns an infeasible result with a human-readable reason for each
    class, so the caller knows exactly what is wrong.
 2. Column generation over the bar contexts, seeded with single-type
-   patterns so pricing keeps working even while the master LP is
+   patterns (and optionally warmed with patterns from a previous
+   plan) so pricing keeps working even while the master LP is
    infeasible.
 3. The integer master problem over the converged columns, with the LP
    solution seeding the fallback fill.
@@ -30,6 +31,7 @@ from constraint_engine.geometry.integer import (
     IntegerSolution,
     solve_master_ip,
 )
+from constraint_engine.geometry.master import MasterColumn
 from constraint_engine.geometry.patterns import (
     Context,
     pattern_offcut,
@@ -53,9 +55,16 @@ _CG_MAX_ROUNDS = 100
 
 
 def solve(
-    problem: CuttingProblem1D, time_limit_s: float = 5.0
+    problem: CuttingProblem1D,
+    time_limit_s: float = 5.0,
+    initial_columns: Sequence[MasterColumn] = (),
 ) -> CuttingResult1D:
-    """Solve a 1D cutting stock problem and return the plan with diagnostics."""
+    """Solve a 1D cutting stock problem and return the plan with diagnostics.
+
+    ``initial_columns`` are warm-start patterns from a previous plan;
+    they enter the column pool behind the seeds, validated and deduped
+    by the generator.
+    """
     start = time.perf_counter()
     contexts = patterns_from_problem(problem)
     bar_by_id = {
@@ -69,7 +78,9 @@ def solve(
     if not any(demand > 0 for demand in problem.demands):
         return _zero_demand(problem, start)
 
-    cg = run_column_generation(problem, contexts)
+    cg = run_column_generation(
+        problem, contexts, initial_columns=initial_columns
+    )
     if cg.infeasible:
         return _infeasible(
             problem,
