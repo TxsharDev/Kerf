@@ -23,6 +23,7 @@ pieces are simply longer remnants in the ledger.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from typing import Sequence
 
 from constraint_engine.geometry.integer import (
@@ -49,9 +50,23 @@ from constraint_engine.geometry.types import (
     CuttingResult1D,
 )
 
-__all__ = ["solve"]
+__all__ = ["PrecheckFailure", "precheck", "solve"]
 
 _CG_MAX_ROUNDS = 100
+
+
+@dataclass(frozen=True)
+class PrecheckFailure:
+    """A machine-readable feasibility failure.
+
+    ``kind`` is a stable identifier (``no_bars``, ``part_too_long``,
+    ``copies_exceed_supply``, ``volume_exceeded``) and ``detail``
+    carries the numbers that produced the failure, so callers can
+    branch on the kind instead of parsing prose.
+    """
+
+    kind: str
+    detail: dict = field(default_factory=dict)
 
 
 def solve(
@@ -71,9 +86,13 @@ def solve(
         bar.id or f"bar_{index}": bar for index, bar in enumerate(problem.bars)
     }
 
-    reasons = _precheck(problem)
-    if reasons:
-        return _infeasible(problem, reasons, start)
+    failures = precheck(problem)
+    if failures:
+        return _infeasible(
+            problem,
+            tuple(_failure_message(failure) for failure in failures),
+            start,
+        )
 
     if not any(demand > 0 for demand in problem.demands):
         return _zero_demand(problem, start)
@@ -144,25 +163,33 @@ def solve(
     )
 
 
-def _precheck(problem: CuttingProblem1D) -> tuple[str, ...]:
-    """Necessary conditions for feasibility; one reason per violated class.
+def precheck(problem: CuttingProblem1D) -> tuple[PrecheckFailure, ...]:
+    """Necessary conditions for feasibility; one failure per violated class.
 
     These are cheap, explainable, and cover every realistic failure.
     When they all pass, the column-generation and integer stages make
     the final call.
     """
     if sum(problem.demands) > 0 and len(problem.bars) == 0:
-        return ("the problem has demand but no bars are available",)
+        return (PrecheckFailure("no_bars"),)
+    if len(problem.bars) == 0:
+        return ()
 
-    reasons: list[str] = []
+    failures: list[PrecheckFailure] = []
     longest = max(bar.length_mm for bar in problem.bars)
     for i, (length_mm, demand) in enumerate(
         zip(problem.part_lengths_mm, problem.demands)
     ):
         if demand > 0 and length_mm > longest:
-            reasons.append(
-                f"part {i} (length {length_mm}mm) is longer than the "
-                f"longest bar ({longest}mm)"
+            failures.append(
+                PrecheckFailure(
+                    "part_too_long",
+                    {
+                        "part_index": i,
+                        "length_mm": length_mm,
+                        "longest_bar_mm": longest,
+                    },
+                )
             )
 
     for i, (length_mm, demand) in enumerate(
@@ -177,9 +204,16 @@ def _precheck(problem: CuttingProblem1D) -> tuple[str, ...]:
             if weight <= capacity:
                 max_copies += capacity // weight
         if max_copies < demand:
-            reasons.append(
-                f"part {i} (length {length_mm}mm): at most {max_copies} "
-                f"copies fit on the bars on hand, demand is {demand}"
+            failures.append(
+                PrecheckFailure(
+                    "copies_exceed_supply",
+                    {
+                        "part_index": i,
+                        "length_mm": length_mm,
+                        "max_copies": max_copies,
+                        "demand": demand,
+                    },
+                )
             )
 
     part_volume = sum(
@@ -188,11 +222,39 @@ def _precheck(problem: CuttingProblem1D) -> tuple[str, ...]:
     )
     bar_volume = sum(bar.length_mm for bar in problem.bars)
     if part_volume > bar_volume:
-        reasons.append(
-            f"total part length ({part_volume}mm) exceeds the total "
-            f"bar length ({bar_volume}mm)"
+        failures.append(
+            PrecheckFailure(
+                "volume_exceeded",
+                {"part_volume_mm": part_volume, "bar_volume_mm": bar_volume},
+            )
         )
-    return tuple(reasons)
+    return tuple(failures)
+
+
+def _failure_message(failure: PrecheckFailure) -> str:
+    """Render a :class:`PrecheckFailure` as the user-facing reason string."""
+    if failure.kind == "no_bars":
+        return "the problem has demand but no bars are available"
+    if failure.kind == "part_too_long":
+        return (
+            f"part {failure.detail['part_index']} (length "
+            f"{failure.detail['length_mm']}mm) is longer than the "
+            f"longest bar ({failure.detail['longest_bar_mm']}mm)"
+        )
+    if failure.kind == "copies_exceed_supply":
+        return (
+            f"part {failure.detail['part_index']} (length "
+            f"{failure.detail['length_mm']}mm): at most "
+            f"{failure.detail['max_copies']} copies fit on the bars "
+            f"on hand, demand is {failure.detail['demand']}"
+        )
+    if failure.kind == "volume_exceeded":
+        return (
+            f"total part length ({failure.detail['part_volume_mm']}mm) "
+            f"exceeds the total bar length "
+            f"({failure.detail['bar_volume_mm']}mm)"
+        )
+    raise ValueError(f"unknown precheck failure kind: {failure.kind!r}")
 
 
 def _assemble(
