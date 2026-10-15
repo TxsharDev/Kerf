@@ -9,6 +9,8 @@ at zero cost, and the shape of the diagnostics dict.
 import numpy as np
 import pytest
 
+from constraint_engine.geometry import solve as solve_mod
+from constraint_engine.geometry.integer import IP_NO_INCUMBENT, IntegerSolution
 from constraint_engine.geometry.master import MasterColumn
 from constraint_engine.geometry.solve import solve
 from constraint_engine.geometry.types import BarSpec, CuttingProblem1D
@@ -230,3 +232,84 @@ class TestInitialColumns:
         problem = two_part_problem()
         with pytest.raises(ValueError, match="context_index"):
             solve(problem, initial_columns=(MasterColumn(7, (1, 0)),))
+
+
+FORMERLY_CAPPED = (
+    "u250_08", "u250_12", "u250_13", "u250_18", "u500_00", "u500_03",
+    "u500_06", "u500_09", "u500_15", "u500_16", "u500_19",
+)
+
+
+def esicup_problem(label: str) -> tuple[CuttingProblem1D, int]:
+    """One Falkenauer instance on FFD bars + 5, with its FFD bar count."""
+    from benchmarks.baselines import first_fit_decreasing
+    from benchmarks.esicup import load
+    from benchmarks.run_benchmarks import INSTANCES_DIR, QUALITY_FILES
+
+    inst = next(
+        inst
+        for name in QUALITY_FILES
+        for inst in load(INSTANCES_DIR / name)
+        if inst.label == label
+    )
+    sizes = [int(size) for size in inst.sizes]
+    lengths = sorted(set(sizes))
+    ffd_bars = len(first_fit_decreasing(sizes, inst.capacity))
+    capacity = int(inst.capacity)
+    problem = CuttingProblem1D(
+        part_lengths_mm=lengths,
+        demands=[sizes.count(length) for length in lengths],
+        bars=tuple(
+            bar(capacity, float(capacity), f"b{i}") for i in range(ffd_bars + 5)
+        ),
+        kerf_mm=0,
+        min_offcut_mm=1,
+    )
+    return problem, ffd_bars
+
+
+def covered(result, problem) -> bool:
+    produced = np.zeros(len(problem.demands), dtype=int)
+    for assignment in result.assignments:
+        produced += np.asarray(assignment.pattern)
+    return bool((produced >= np.asarray(problem.demands)).all())
+
+
+class TestNeverWorseThanGreedy:
+    @pytest.mark.parametrize("label", FORMERLY_CAPPED)
+    def test_formerly_capped_instance_resolves(self, label):
+        # These eleven hit the 100-round cap before the greedy seed and
+        # the bound stop, and were reported infeasible.
+        problem, ffd_bars = esicup_problem(label)
+        result = solve(problem)
+        assert result.feasible
+        assert result.stats["cg_rounds"] < 100
+        assert covered(result, problem)
+        assert result.stats["bars_used"] <= ffd_bars
+
+    def test_round_cap_still_returns_a_plan(self, monkeypatch):
+        problem, ffd_bars = esicup_problem("u500_00")
+        capped = solve_mod.run_column_generation
+
+        def one_round(*args, **kwargs):
+            return capped(*args, max_rounds=1, **kwargs)
+
+        monkeypatch.setattr(solve_mod, "run_column_generation", one_round)
+        result = solve(problem)
+        assert result.feasible
+        assert result.stats["cg_rounds"] == 1
+        assert covered(result, problem)
+        assert result.stats["bars_used"] <= ffd_bars
+
+    def test_failed_integer_solve_falls_back_to_greedy(self, monkeypatch):
+        problem, ffd_bars = esicup_problem("u250_08")
+
+        def no_incumbent(columns, *args, **kwargs):
+            return IntegerSolution(IP_NO_INCUMBENT, tuple(columns), (), 0.0)
+
+        monkeypatch.setattr(solve_mod, "solve_master_ip", no_incumbent)
+        result = solve(problem)
+        assert result.feasible
+        assert result.stats["ip_status"] == "heuristic"
+        assert covered(result, problem)
+        assert result.stats["bars_used"] == ffd_bars

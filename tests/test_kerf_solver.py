@@ -235,3 +235,36 @@ def test_reserved_and_consumed_stock_are_not_used():
 
     assert {cut.stock_item_id for cut in plan.assignments} == {"bar-open"}
     verify_plan(plan, cutting_list, inventory.values())
+
+
+def test_column_generation_cut_short_still_yields_a_verified_plan(monkeypatch):
+    from constraint_engine.geometry import solve as engine_solve_mod
+
+    capped = engine_solve_mod.run_column_generation
+
+    def one_round(*args, **kwargs):
+        return capped(*args, max_rounds=1, **kwargs)
+
+    monkeypatch.setattr(engine_solve_mod, "run_column_generation", one_round)
+    material = make_material()
+    inventory = {
+        f"bar-{i}": make_bar(f"bar-{i}", "mat-1", 6000) for i in range(6)
+    }
+    inventory["rm-1"] = make_bar(
+        "rm-1", "mat-1", 2400, origin=Origin.REMNANT, created_at=datetime(2026, 1, 5)
+    )
+    parts = [
+        Part(id=f"p-{i}", material_id="mat-1", length=length, quantity=quantity)
+        for i, (length, quantity) in enumerate(
+            [(2210, 3), (1730, 4), (1180, 5), (960, 4), (430, 6)]
+        )
+    ]
+    cutting_list = make_list("cl-capped", parts)
+
+    plan = solve(cutting_list, inventory, {"mat-1": material}, kerf_mm=3)
+
+    counts = produced_counts(plan)
+    for part in parts:
+        assert counts[part.id] >= part.quantity
+    assert "rm-1" in {cut.stock_item_id for cut in plan.assignments}
+    verify_plan(plan, cutting_list, inventory.values())

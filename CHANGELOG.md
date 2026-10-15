@@ -33,3 +33,5 @@ All notable changes to this project are documented here.
 
 ### Fixed
 - The integer master runs the deterministic fill before declaring a restricted master infeasible, so a plan column generation never priced is still found instead of a false infeasible.
+- Column generation no longer stalls on the ESICUP instances: the first-fit decreasing plan seeds the column pool so the master LP is feasible from round one, each round prices at Wentges-smoothed duals between the current dual and the best-bound stability center, and the loop stops once the Lagrangian/Farley lower bound and the master value round up to the same integer target. All 40 Falkenauer instances resolve well inside the 100-round cap (11 used to hit it and were reported infeasible).
+- A solve never returns worse than the first-fit decreasing plan: when the integer master ends worse, with no incumbent, or infeasible over the priced columns, the greedy plan is returned, and a run cut short at the round cap still goes to the integer stage instead of being reported infeasible.

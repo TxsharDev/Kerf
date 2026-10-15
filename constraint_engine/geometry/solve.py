@@ -7,13 +7,16 @@ objective values, and diagnostics. The pipeline is:
 1. Prechecks: necessary conditions for feasibility. Any failure
    returns an infeasible result with a human-readable reason for each
    class, so the caller knows exactly what is wrong.
-2. Column generation over the bar contexts, seeded with single-type
-   patterns (and optionally warmed with patterns from a previous
-   plan) so pricing keeps working even while the master LP is
-   infeasible.
-3. The integer master problem over the converged columns, with the LP
-   solution seeding the fallback fill.
-4. Assembly: context-level column counts are expanded to physical bar
+2. A first-fit decreasing plan over the bar contexts. Its patterns
+   seed column generation, so the master LP is feasible from the first
+   round, and the plan itself is the floor the result must beat.
+3. Column generation over the bar contexts, seeded with single-type
+   patterns and the greedy patterns (and optionally warmed with
+   patterns from a previous plan).
+4. The integer master problem over the generated columns, with the LP
+   solution seeding the fallback fill. If the integer solve ends worse
+   than the greedy plan, or with no plan, the greedy plan is returned.
+5. Assembly: context-level column counts are expanded to physical bar
    assignments in the context's bar order (oldest remnant first).
 
 The model is a cover: the plan may overproduce, and overproduced
@@ -26,7 +29,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from constraint_engine.geometry.greedy import first_fit_decreasing
 from constraint_engine.geometry.integer import (
+    IP_HEURISTIC,
     IP_INFEASIBLE,
     IP_NO_INCUMBENT,
     IntegerSolution,
@@ -38,10 +43,7 @@ from constraint_engine.geometry.patterns import (
     pattern_offcut,
     patterns_from_problem,
 )
-from constraint_engine.geometry.pricing import (
-    STOP_MAX_ROUNDS,
-    run_column_generation,
-)
+from constraint_engine.geometry.pricing import run_column_generation
 from constraint_engine.geometry.types import (
     ORIGIN_REMNANT,
     BarAssignment,
@@ -51,8 +53,6 @@ from constraint_engine.geometry.types import (
 )
 
 __all__ = ["PrecheckFailure", "precheck", "solve"]
-
-_CG_MAX_ROUNDS = 100
 
 
 @dataclass(frozen=True)
@@ -97,22 +97,13 @@ def solve(
     if not any(demand > 0 for demand in problem.demands):
         return _zero_demand(problem, start)
 
-    cg = run_column_generation(
-        problem, contexts, initial_columns=initial_columns
-    )
+    greedy = first_fit_decreasing(problem, contexts)
+    seeds = tuple(initial_columns) + (greedy.columns if greedy else ())
+    cg = run_column_generation(problem, contexts, initial_columns=seeds)
     if cg.infeasible:
         return _infeasible(
             problem,
             ("column generation proved the master problem infeasible",),
-            start,
-        )
-    if cg.stop == STOP_MAX_ROUNDS and cg.solution is None:
-        return _infeasible(
-            problem,
-            (
-                f"column generation did not converge within "
-                f"{_CG_MAX_ROUNDS} rounds"
-            ),
             start,
         )
 
@@ -120,6 +111,15 @@ def solve(
     ip = solve_master_ip(
         cg.columns, problem, contexts, lp_x=lp_x, time_limit_s=time_limit_s
     )
+    if greedy is not None and (
+        ip.status in (IP_INFEASIBLE, IP_NO_INCUMBENT) or ip.value > greedy.value
+    ):
+        ip = IntegerSolution(
+            status=IP_HEURISTIC,
+            columns=greedy.columns,
+            x=greedy.counts,
+            value=greedy.value,
+        )
     if ip.status == IP_INFEASIBLE:
         return _infeasible(
             problem,
