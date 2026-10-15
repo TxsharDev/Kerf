@@ -21,17 +21,32 @@ the capacity-free dual, prices, and adds any new columns. When pricing
 adds nothing the run stops: as "converged" if the master LP is optimal
 at that point, as "infeasible" otherwise.
 
+The duals of the cutting stock master are highly degenerate, and
+pricing at the raw extreme-point dual alone stalls in a long tail of
+rounds that each move the LP by almost nothing. Two things cut the
+tail. Each round prices at several points between the current dual
+and the stability center, the dual with the best lower bound seen so
+far (Wentges smoothing), and keeps every pattern that prices out at the
+current dual. Every priced point also yields a lower bound on any
+integer plan; when bar costs are whole numbers and the bound and the
+master value round up to the same multiple of the cost unit, further
+columns cannot change the integer target and the run stops as "bound".
+
 Known limitation: if the master LP stays infeasible, the true problem
 is feasible, and no priced pattern beats its context cost, the loop
-stops as "infeasible" without proof. The prechecks in ``solve`` catch
-every realistic instance of this corner, and the property test exists
-to surface a real one.
+stops as "infeasible" without proof. ``solve`` seeds the first-fit
+decreasing plan, which keeps the master LP feasible whenever that plan
+exists, the prechecks catch the realistic remainder, and the property
+test exists to surface a real one.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional, Sequence
+
+import numpy as np
 
 from constraint_engine.geometry.knapsack import bounded_knapsack
 from constraint_engine.geometry.master import (
@@ -45,6 +60,7 @@ from constraint_engine.geometry.patterns import Context, pattern_fits
 from constraint_engine.geometry.types import CuttingProblem1D
 
 __all__ = [
+    "STOP_BOUND",
     "STOP_CONVERGED",
     "STOP_INFEASIBLE",
     "STOP_MAX_ROUNDS",
@@ -58,6 +74,9 @@ STOP_NO_DEMAND = "no_demand"
 STOP_INFEASIBLE = "infeasible"
 STOP_CONVERGED = "converged"
 STOP_MAX_ROUNDS = "max_rounds"
+STOP_BOUND = "bound"
+
+_SMOOTHING = (0.8, 0.5, 0.0)
 
 
 @dataclass(frozen=True)
@@ -120,22 +139,78 @@ def price_columns(
     zero demand are excluded from the knapsack entirely, so a high
     dual price on an undemanded part cannot pull it into a pattern.
     """
+    return tuple(
+        MasterColumn(context_index=context_index, pattern=pattern)
+        for context_index, (pattern, value) in enumerate(
+            _best_patterns(problem, contexts, dual)
+        )
+        if value > contexts[context_index].cost + tolerance
+    )
+
+
+def _best_patterns(
+    problem: CuttingProblem1D,
+    contexts: Sequence[Context],
+    dual: Sequence[float],
+) -> list[tuple[tuple[int, ...], float]]:
+    """The highest dual-value pattern on each context, with its value."""
     profits = [float(price) for price in dual]
     weights = [length_mm + problem.kerf_mm for length_mm in problem.part_lengths_mm]
-    new_columns: list[MasterColumn] = []
-    for context_index, context in enumerate(contexts):
+    best: list[tuple[tuple[int, ...], float]] = []
+    for context in contexts:
         capacity = context.length_mm + problem.kerf_mm
         bounds = [
             min(int(demand), capacity // weight) if weight <= capacity else 0
             for demand, weight in zip(problem.demands, weights)
         ]
         counts, value = bounded_knapsack(profits, weights, bounds, capacity)
-        if value > context.cost + tolerance:
-            pattern = tuple(int(count) for count in counts)
-            new_columns.append(
-                MasterColumn(context_index=context_index, pattern=pattern)
-            )
-    return tuple(new_columns)
+        best.append((tuple(int(count) for count in counts), value))
+    return best
+
+
+def _lagrangian_bound(
+    problem: CuttingProblem1D,
+    contexts: Sequence[Context],
+    dual: Sequence[float],
+    best: Sequence[tuple[tuple[int, ...], float]],
+) -> float:
+    """A lower bound on every integer plan, valid for any ``dual >= 0``.
+
+    The better of two classical bounds. Lagrangian: relaxing the demand
+    rows with multipliers ``dual`` leaves one knapsack per context, and
+    each of its ``Q_c`` bars either stays idle or cuts the best pattern,
+    whichever is cheaper at these prices. Farley: scaling ``dual`` down
+    until no pattern beats its context cost gives a feasible dual.
+    """
+    dual_value = float(np.dot(problem.demands, dual))
+    bound = dual_value
+    scale = 1.0
+    for context, (_, value) in zip(contexts, best):
+        bound += context.bar_count * min(0.0, context.cost - value)
+        if value > context.cost:
+            scale = min(scale, context.cost / value)
+    return max(bound, scale * dual_value)
+
+
+def _cost_unit(contexts: Sequence[Context]) -> Optional[int]:
+    """The largest unit every plan cost is a multiple of, if costs are whole."""
+    costs = [context.cost for context in contexts if context.cost > 0]
+    if not costs or not all(float(cost).is_integer() for cost in costs):
+        return None
+    return math.gcd(*(int(cost) for cost in costs))
+
+
+def _bound_settled(lp_value: float, bound: float, unit: Optional[int]) -> bool:
+    """Whether more columns can no longer raise the integer lower bound.
+
+    The LP optimum lies between the Lagrangian bound and the current
+    master value. With whole costs every plan costs a multiple of
+    ``unit``, so once both round up to the same multiple the LP has
+    nothing left to say about the integer plan.
+    """
+    if unit is not None:
+        return math.ceil(bound / unit - 1e-6) >= math.ceil(lp_value / unit - 1e-6)
+    return lp_value - bound <= 1e-9 * max(1.0, abs(lp_value))
 
 
 def _validate_initial_columns(
@@ -194,9 +269,10 @@ def run_column_generation(
     """Seed, then loop: master LP, capacity-free dual, pricing.
 
     The loop stops when pricing adds no new column: "converged" if the
-    master LP is optimal at that point, "infeasible" otherwise. A run
-    that exhausts ``max_rounds`` without either stops "max_rounds" and
-    reports the last optimal master solution, if any.
+    master LP is optimal at that point, "infeasible" otherwise. It stops
+    "bound" once the lower bound settles the integer target. A run
+    that exhausts ``max_rounds`` without any of these stops "max_rounds"
+    and reports the last optimal master solution, if any.
 
     ``initial_columns`` are warm-start patterns from a previous plan
     (the engine's replan hands them in so a replan reuses what already
@@ -236,6 +312,9 @@ def run_column_generation(
             seen.add(key)
             columns = columns + (column,)
     last_optimal: Optional[MasterSolution] = None
+    unit = _cost_unit(contexts)
+    center: Optional[np.ndarray] = None
+    center_bound = -math.inf
 
     for round_no in range(1, max_rounds + 1):
         solution = solve_master_lp(columns, problem, contexts)
@@ -254,12 +333,23 @@ def run_column_generation(
                 infeasible=True,
             )
 
+        # The last point is the current dual itself, so a round that
+        # adds nothing is still a proof of convergence.
         fresh: list[MasterColumn] = []
-        for candidate in price_columns(problem, contexts, dual, tolerance):
-            key = (candidate.context_index, candidate.pattern)
-            if key not in seen:
-                seen.add(key)
-                fresh.append(candidate)
+        points = [dual] if center is None else [
+            a * center + (1.0 - a) * dual for a in _SMOOTHING
+        ]
+        for point in points:
+            best = _best_patterns(problem, contexts, point)
+            bound = _lagrangian_bound(problem, contexts, point, best)
+            if bound > center_bound:
+                center, center_bound = point, bound
+            for context_index, (pattern, _) in enumerate(best):
+                value = float(np.dot(pattern, dual))
+                key = (context_index, pattern)
+                if value > contexts[context_index].cost + tolerance and key not in seen:
+                    seen.add(key)
+                    fresh.append(MasterColumn(context_index, pattern))
 
         if not fresh:
             converged = solution.status == OPTIMAL
@@ -269,6 +359,17 @@ def run_column_generation(
                 rounds=round_no,
                 stop=STOP_CONVERGED if converged else STOP_INFEASIBLE,
                 infeasible=not converged,
+            )
+
+        if solution.status == OPTIMAL and _bound_settled(
+            solution.value, center_bound, unit
+        ):
+            return ColumnGenerationResult(
+                columns=columns,
+                solution=solution,
+                rounds=round_no,
+                stop=STOP_BOUND,
+                infeasible=False,
             )
 
         columns = columns + tuple(fresh)
