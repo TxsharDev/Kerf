@@ -30,6 +30,8 @@ All notable changes to this project are documented here.
 - End-to-end round-trip test: the offcut of a cut plan returns to the rack, the next cutting list is solved against that same rack and satisfied by the remnant with no data entry, the ledger records the dollars saved, and a scrapped remnant makes the next list fail with a named material.
 - Benchmark suite: forty integer ESICUP Falkenauer 1D cutting stock instances (binpack2 + binpack3) run against an FFD-decreasing baseline through both the public engine API and the Kerf product API, plus two seeded scale workloads with time budgets; the driver prints a plain-text report, names every infeasible instance, and exits non-zero when the acceptance target (aggregate kerf waste at most 92% of FFD waste with every instance resolved) is missed.
 - Root README: the measured benchmark report pasted unmodified, the acceptance targets with each half stated as met or missed, the column generation round cap finding on the 11 unresolved instances, and how to run the tests and the benchmarks.
+- MIT license.
+- README rewritten as a standalone project page: install, usage example, how the solve works, the benchmark report from the fixed solver, and how to reproduce it.
 
 ### Fixed
 - The integer master runs the deterministic fill before declaring a restricted master infeasible, so a plan column generation never priced is still found instead of a false infeasible.
