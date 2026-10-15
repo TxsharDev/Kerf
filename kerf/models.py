@@ -1,7 +1,7 @@
 """Domain model for the Kerf product.
 
-The data model follows the registry spec in ``kerf.md`` section 3:
-materials, stock items, cutting lists, plans, cuts, and savings events.
+The records are materials, stock items, cutting lists, plans, cuts,
+and savings events.
 
 Two design points carry the product:
 

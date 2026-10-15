@@ -92,7 +92,7 @@ def compute_all(
     items: Mapping[str, StockItem],
     materials: Mapping[str, Material],
 ) -> dict:
-    """All five proof metrics keyed by their spec names."""
+    """All five proof metrics keyed by name."""
     return {
         "utilization": utilization(cuts, items),
         "waste_length": waste_length(cuts, items),

@@ -19,10 +19,10 @@ All notable changes to this project are documented here.
 - `initial_columns` plumbed through the 1D `solve` orchestrator for replans that reuse patterns from a previous plan.
 - Structured feasibility precheck: `precheck` returns `PrecheckFailure` items with machine-readable kinds (`no_bars`, `part_too_long`, `copies_exceed_supply`, `volume_exceeded`) and the numbers behind each; `solve` keeps the exact legacy reason strings.
 - Engine public operations: solve, explain, replan, diagnose with model dispatch on metadata, Solution metrics for parts/bars/contexts, and precheck-driven diagnoses.
-- Kerf domain model: Material, StockItem, Part, CuttingList, Cut, CutPiece, Plan, SavingsEvent with construction-time validation and spec-matched enums; plain-string enum values coerce to the same member.
+- Kerf domain model: Material, StockItem, Part, CuttingList, Cut, CutPiece, Plan, SavingsEvent with construction-time validation and string-valued enums; plain-string enum values coerce to the same member.
 - `InfeasiblePlanError` carrying per-material engine reasons plus a flattened, deterministically ordered `.reasons` list.
 - CSV cutting list importer (`load_cutting_list`) with a strict five-column header, row-numbered structural errors, and default `cl-<12 hex>` ids; sample fixture `tests/fixtures/sample_cutting_list.csv`.
-- Pure proof metrics: utilization, waste length, new stock used, remnant length consumed, dollars saved, and `compute_all` keyed by the spec names.
+- Pure proof metrics: utilization, waste length, new stock used, remnant length consumed, dollars saved, and `compute_all` keyed by metric name.
 - Plan verification oracle (`verify_plan`): arithmetic reconciliation, no double-cut, unknown part/item, material match, and per-part demand; overproduction legal; `PlanVerificationError` aggregates all problems found in one pass.
 - Kerf solver (`solve`): a cutting list, a stock room, and material prices become a PROPOSED plan with one named cut piece per part id, remnant-first bar pricing at zero cost, the five proof metrics, and every infeasible material collected before `InfeasiblePlanError` is raised.
 - Kerf ledger (`record_plan_cut`): a PROPOSED or RELEASED plan becomes CUT, its consumed bars become CONSUMED, its offcuts return to the rack as AVAILABLE remnants carrying their parent plan, and a `SavingsEvent` is written with the remnant consumption and dollars avoided derived from the pure metrics; every guard runs before any mutation.

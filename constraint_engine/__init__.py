@@ -1,4 +1,4 @@
-"""Constraint engine.
+"""Constraint Engine.
 
 A shared solver library for resource-constrained optimization.
 Products import this as a library; it has no web framework, no database

@@ -1,4 +1,4 @@
-"""Core data types for the constraint engine.
+"""Core data types for the Constraint Engine.
 
 Five concepts form the boundary between products and the engine:
 Resource, Task, Constraint, Objective, Solution.

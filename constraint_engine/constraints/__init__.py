@@ -1,4 +1,4 @@
-"""Constraint module for the constraint engine.
+"""Constraint module for the Constraint Engine.
 
 Products add constraint types by contributing them to the engine,
 never by implementing them privately.
